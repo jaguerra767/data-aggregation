@@ -1,0 +1,5 @@
+/target
+/.env
+/.firebaserc
+*.log
+firebase.json
