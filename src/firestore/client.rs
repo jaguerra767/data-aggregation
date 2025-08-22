@@ -12,13 +12,21 @@ use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FirestoreLibraData {
-    pub device: menu::device::Device,
+    pub device: FirestoreDevice,
     pub location: String,
     pub ingredient: String,
+    #[serde(rename = "dataAction")]
     pub data_action: Action,
     pub amount: f64,
     #[serde(with = "firestore::serialize_as_timestamp")]
     pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FirestoreDevice {
+    pub model: menu::device::Model,
+    #[serde(rename = "serialNumber")]
+    pub serial_number: String,
 }
 
 impl From<LibraData> for FirestoreLibraData {
@@ -29,7 +37,10 @@ impl From<LibraData> for FirestoreLibraData {
         let chrono_timestamp = DateTime::from_timestamp(timestamp_unix, timestamp_nanos).unwrap();
         
         Self {
-            device: data.device,
+            device: FirestoreDevice {
+                model: data.device.model,
+                serial_number: data.device.serial_number,
+            },
             location: data.location,
             ingredient: data.ingredient,
             data_action: data.data_action,
@@ -48,7 +59,10 @@ impl From<FirestoreLibraData> for LibraData {
             .unwrap();
             
         Self {
-            device: data.device,
+            device: menu::device::Device {
+                model: data.device.model,
+                serial_number: data.device.serial_number,
+            },
             location: data.location,
             ingredient: data.ingredient,
             data_action: data.data_action,
@@ -118,7 +132,7 @@ async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
     let firestore_data: Vec<FirestoreLibraData> = match last_processed {
         Some(last_proc) => {
             // LastProcessed already has chrono::DateTime<Utc>, so use it directly
-            db.fluent()
+            let result = db.fluent()
                 .select()
                 .from("libra")
                 .filter(|q| {
@@ -127,17 +141,33 @@ async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
                 })
                 .obj()
                 .query()
-                .await?
+                .await;
+            
+            match result {
+                Ok(data) => data,
+                Err(e) => {
+                    println!("Warning: Failed to fetch some documents, continuing with partial data: {}", e);
+                    Vec::new()
+                }
+            }
         }
         None => {
             // No last_processed document exists, fetch all entries
             println!("No last_processed document found, fetching all entries");
-            db.fluent()
+            let result = db.fluent()
                 .select()
                 .from("libra")
                 .obj()
                 .query()
-                .await?
+                .await;
+                
+            match result {
+                Ok(data) => data,
+                Err(e) => {
+                    println!("Warning: Failed to fetch some documents, continuing with partial data: {}", e);
+                    Vec::new()
+                }
+            }
         }
     };
     
