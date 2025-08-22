@@ -7,7 +7,8 @@ edition = "2021"
 firestore = {version = "0.47.0"}
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.15"
-tokio = { version = "1.47.1", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full", "macros"] }
+warp = "0.3"
 time = { version = "0.3", features = ["parsing", "formatting", "local-offset", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 menu = {git = "https://github.com/rileyhernandez/menu.git"}
