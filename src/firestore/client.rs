@@ -3,6 +3,7 @@ use crate::processing::action::aggregate_actions;
 use crate::processing::category::aggregate_by_category;
 use crate::processing::time::{aggregate_daily, aggregate_hourly};
 use firestore::*;
+use firestore::FirestoreTimestamp;
 use menu::{action::Action, libra_data::LibraData};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -147,14 +148,17 @@ async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
     
     let firestore_data: Vec<FirestoreLibraData> = match last_processed {
         Some(last_proc) => {
-            // LastProcessed already has chrono::DateTime<Utc>, so use it directly
             println!("Filtering entries newer than: {}", last_proc.timestamp);
+            
+            // Convert DateTime<Utc> to FirestoreTimestamp
+            let firestore_timestamp = FirestoreTimestamp::from(last_proc.timestamp);
+            
             let result = db.fluent()
                 .select()
                 .from("libra")
                 .filter(|q| {
                     q.field("timestamp")
-                        .greater_than(last_proc.timestamp)
+                        .greater_than(firestore_timestamp.clone())
                 })
                 .obj()
                 .query()

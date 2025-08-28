@@ -82,6 +82,15 @@ async fn test_aggregation() -> Result<(), Error> {
         .expect("Failed to install rustls crypto provider");
 
     let db = FirestoreDb::new("back-of-house-backend".to_string()).await?;
+    
+    // Clear the last_processed record to start fresh
+    // let _ = db.fluent()
+    //     .delete()
+    //     .from("aggregates")
+    //     .document_id("last_processed")
+    //     .execute()
+    //     .await;
+        
     seed_libra_data(&db).await?;
     process_aggregations(&db).await?;
     Ok(())
