@@ -125,10 +125,10 @@ CMD ["data-aggregation"]
 gcloud run deploy data-aggregation \
   --source . \
   --platform managed \
-  --region us-central1 \
+  --region us-west1 \
   --allow-unauthenticated \
-  --service-account=data-aggregation-sa@PROJECT_ID.iam.gserviceaccount.com \
-  --set-env-vars="PROJECT_ID=PROJECT_ID" \
+  --service-account=data-aggregation-sa@back-of-house-backend.iam.gserviceaccount.com \
+  --set-env-vars="PROJECT_ID=back-of-house-backend" \
   --memory=512Mi \
   --cpu=1 \
   --timeout=900s \
@@ -141,7 +141,7 @@ gcloud run deploy data-aggregation \
 - Add any required configuration via `--set-env-vars`
 - Use Secret Manager for sensitive values:
   ```bash
-  --set-secrets="API_KEY=projects/PROJECT_ID/secrets/api-key:latest"
+  --set-secrets="API_KEY=projects/back-of-house-backend/secrets/api-key:latest"
   ```
 
 ### 5. Set up Scheduled Execution
@@ -150,7 +150,7 @@ gcloud run deploy data-aggregation \
 ```bash
 # Get the Cloud Run service URL
 SERVICE_URL=$(gcloud run services describe data-aggregation \
-  --region=us-central1 \
+  --region=us-west1 \
   --format="value(status.url)")
 
 # Create cron job (runs every 6 hours)
@@ -158,7 +158,7 @@ gcloud scheduler jobs create http data-aggregation-cron \
   --schedule="0 */6 * * *" \
   --uri="$SERVICE_URL" \
   --http-method=POST \
-  --oidc-service-account-email=data-aggregation-sa@PROJECT_ID.iam.gserviceaccount.com \
+  --oidc-service-account-email=data-aggregation-sa@back-of-house-backend.iam.gserviceaccount.com \
   --location=us-central1 \
   --description="Data aggregation processing job"
 ```

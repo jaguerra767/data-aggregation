@@ -129,9 +129,26 @@ async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
     let last_processed = get_last_processed(db).await?;
     println!("Last processed: {:?}", last_processed);
     
+    // Debug: Check what data exists in Firestore (last 5 entries)
+    let all_data_sample: Vec<FirestoreLibraData> = db.fluent()
+        .select()
+        .from("libra")
+        .order_by([("timestamp", firestore::FirestoreQueryDirection::Descending)])
+        .limit(5)
+        .obj()
+        .query()
+        .await
+        .unwrap_or_default();
+    
+    println!("Recent entries in Firestore:");
+    for entry in &all_data_sample {
+        println!("  Timestamp: {}", entry.timestamp);
+    }
+    
     let firestore_data: Vec<FirestoreLibraData> = match last_processed {
         Some(last_proc) => {
             // LastProcessed already has chrono::DateTime<Utc>, so use it directly
+            println!("Filtering entries newer than: {}", last_proc.timestamp);
             let result = db.fluent()
                 .select()
                 .from("libra")
@@ -172,6 +189,11 @@ async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
     };
     
     println!("Query returned {} entries", firestore_data.len());
+    
+    // Debug: Print timestamps of returned data
+    for entry in &firestore_data {
+        println!("Found entry with timestamp: {}", entry.timestamp);
+    }
     
     // Convert back to LibraData
     let data: Vec<LibraData> = firestore_data.into_iter().map(LibraData::from).collect();

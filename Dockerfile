@@ -37,6 +37,9 @@ RUN apt-get update && \
 # Copy the built binary from builder stage
 COPY --from=builder /app/target/release/data-aggregation /usr/local/bin/data-aggregation
 
+# Set Google Cloud Project ID
+ENV GOOGLE_CLOUD_PROJECT=back-of-house-backend
+
 # Cloud Run requires port 8080 to be exposed
 EXPOSE 8080
 
