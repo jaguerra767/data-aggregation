@@ -57,7 +57,8 @@ async fn seed_libra_data(db: &FirestoreDb) -> Result<(), Error> {
         println!("Inserting data: {:?}", d);
         // Convert to FirestoreLibraData for proper timestamp serialization
         let firestore_data = data_aggregation::firestore::client::FirestoreLibraData::from(d);
-        let result = db.fluent()
+        let result = db
+            .fluent()
             .insert()
             .into("libra")
             .generate_document_id()
@@ -73,16 +74,19 @@ async fn seed_libra_data(db: &FirestoreDb) -> Result<(), Error> {
 async fn test_aggregation() -> Result<(), Error> {
     // Try to load .env and see if it succeeds
     dotenv::dotenv().ok();
-    
+
     // Debug: Check if the env var is set correctly
-    println!("FIRESTORE_EMULATOR_HOST: {:?}", std::env::var("FIRESTORE_EMULATOR_HOST"));
-    
+    println!(
+        "FIRESTORE_EMULATOR_HOST: {:?}",
+        std::env::var("FIRESTORE_EMULATOR_HOST")
+    );
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
     let db = FirestoreDb::new("back-of-house-backend".to_string()).await?;
-    
+
     // Clear the last_processed record to start fresh
     // let _ = db.fluent()
     //     .delete()
@@ -90,7 +94,7 @@ async fn test_aggregation() -> Result<(), Error> {
     //     .document_id("last_processed")
     //     .execute()
     //     .await;
-        
+
     seed_libra_data(&db).await?;
     process_aggregations(&db).await?;
     Ok(())

@@ -1,15 +1,15 @@
 use crate::error::Error;
-use crate::processing::action::aggregate_actions;
+use crate::processing::action::{aggregate_actions, ActionAggregates};
 use crate::processing::category::aggregate_by_category;
 use crate::processing::time::{aggregate_daily, aggregate_hourly};
-use firestore::*;
+use chrono::{DateTime, Utc};
 use firestore::FirestoreTimestamp;
+use firestore::*;
 use menu::{action::Action, libra_data::LibraData};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use time::Date;
 use time::OffsetDateTime;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FirestoreLibraData {
@@ -36,7 +36,7 @@ impl From<LibraData> for FirestoreLibraData {
         let timestamp_unix = data.timestamp.unix_timestamp();
         let timestamp_nanos = data.timestamp.nanosecond();
         let chrono_timestamp = DateTime::from_timestamp(timestamp_unix, timestamp_nanos).unwrap();
-        
+
         Self {
             device: FirestoreDevice {
                 model: data.device.model,
@@ -58,7 +58,7 @@ impl From<FirestoreLibraData> for LibraData {
             .unwrap()
             .replace_nanosecond(data.timestamp.timestamp_subsec_nanos())
             .unwrap();
-            
+
         Self {
             device: menu::device::Device {
                 model: data.device.model,
@@ -80,11 +80,11 @@ struct LastProcessed {
     pub timestamp: DateTime<Utc>,
 }
 
-async fn get_last_processed(db: &FirestoreDb) -> Result<Option<LastProcessed>, Error> {
+async fn fetch_last_processed(db: &FirestoreDb) -> Result<Option<LastProcessed>, Error> {
     let last_processed = db
         .fluent()
         .select()
-        .by_id_in("aggregates")
+        .by_id_in("aggregates_metadata")
         .obj::<LastProcessed>()
         .one("last_processed")
         .await?;
@@ -97,26 +97,27 @@ async fn update_last_processed(db: &FirestoreDb, entries: &[LibraData]) -> Resul
         let timestamp_unix = latest_entry.timestamp.unix_timestamp();
         let timestamp_nanos = latest_entry.timestamp.nanosecond();
         let chrono_timestamp = DateTime::from_timestamp(timestamp_unix, timestamp_nanos).unwrap();
-        
+
         let last_processed = LastProcessed {
             id: "last_processed".to_string(),
             timestamp: chrono_timestamp,
         };
-        
+
         // Use insert first, then update if it fails (upsert behavior)
-        let insert_result = db.fluent()
+        let insert_result = db
+            .fluent()
             .insert()
-            .into("aggregates")
+            .into("aggregates_metadata")
             .document_id("last_processed")
             .object(&last_processed)
             .execute::<()>()
             .await;
-            
+
         if insert_result.is_err() {
             // Document exists, update it
             db.fluent()
                 .update()
-                .in_col("aggregates")
+                .in_col("aggregates_metadata")
                 .document_id("last_processed")
                 .object(&last_processed)
                 .execute::<()>()
@@ -126,34 +127,16 @@ async fn update_last_processed(db: &FirestoreDb, entries: &[LibraData]) -> Resul
     Ok(())
 }
 
-async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
-    let last_processed = get_last_processed(db).await?;
-    println!("Last processed: {:?}", last_processed);
-    
-    // Debug: Check what data exists in Firestore (last 5 entries)
-    let all_data_sample: Vec<FirestoreLibraData> = db.fluent()
-        .select()
-        .from("libra")
-        .order_by([("timestamp", firestore::FirestoreQueryDirection::Descending)])
-        .limit(5)
-        .obj()
-        .query()
-        .await
-        .unwrap_or_default();
-    
-    println!("Recent entries in Firestore:");
-    for entry in &all_data_sample {
-        println!("  Timestamp: {}", entry.timestamp);
-    }
-    
+async fn fetch_new_entries(db: &FirestoreDb, last_processed: Option<LastProcessed>) -> Result<Vec<LibraData>, Error> {
+
     let firestore_data: Vec<FirestoreLibraData> = match last_processed {
         Some(last_proc) => {
             println!("Filtering entries newer than: {}", last_proc.timestamp);
-            
             // Convert DateTime<Utc> to FirestoreTimestamp
             let firestore_timestamp = FirestoreTimestamp::from(last_proc.timestamp);
-            
-            let result = db.fluent()
+
+            let result = db
+                .fluent()
                 .select()
                 .from("libra")
                 .filter(|q| {
@@ -163,11 +146,14 @@ async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
                 .obj()
                 .query()
                 .await;
-            
+
             match result {
                 Ok(data) => data,
                 Err(e) => {
-                    println!("Warning: Failed to fetch some documents, continuing with partial data: {}", e);
+                    println!(
+                        "Warning: Failed to fetch some documents, continuing with partial data: {}",
+                        e
+                    );
                     Vec::new()
                 }
             }
@@ -175,30 +161,23 @@ async fn fetch_new_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, Error> {
         None => {
             // No last_processed document exists, fetch all entries
             println!("No last_processed document found, fetching all entries");
-            let result = db.fluent()
-                .select()
-                .from("libra")
-                .obj()
-                .query()
-                .await;
-                
+            let result = db.fluent().select().from("libra").obj().query().await;
+
             match result {
                 Ok(data) => data,
                 Err(e) => {
-                    println!("Warning: Failed to fetch some documents, continuing with partial data: {}", e);
+                    println!(
+                        "Warning: Failed to fetch some documents, continuing with partial data: {}",
+                        e
+                    );
                     Vec::new()
                 }
             }
         }
     };
-    
+
     println!("Query returned {} entries", firestore_data.len());
-    
-    // Debug: Print timestamps of returned data
-    for entry in &firestore_data {
-        println!("Found entry with timestamp: {}", entry.timestamp);
-    }
-    
+
     // Convert back to LibraData
     let data: Vec<LibraData> = firestore_data.into_iter().map(LibraData::from).collect();
     Ok(data)
@@ -262,30 +241,52 @@ async fn write_by_date(db: &FirestoreDb, aggregates: HashMap<Date, usize>) -> Re
     Ok(())
 }
 
+
+// async fn fetch_action_aggregates(db: &FirestoreDb) -> Result<HashMap<Action, usize>, Error> {
+//     let mut action_aggregates: HashMap<Action, usize> = HashMap::new();
+//     let actions = ["Heartbeat", "Served", "RanOut", "Starting", "Refilled"];
+//     for act in actions {
+//         if let Some(res) = db
+//             .fluent()
+//             .select()
+//             .by_id_in("aggregates_metadata")
+//             .obj::<ActionAggregates>()
+//             .one(act)
+//             .await?
+//         {
+//             action_aggregates.insert(serde_json::from_str::<Action>(act)?, res.count);
+//         }
+//     }
+//     Ok(action_aggregates)
+// }
+
 pub async fn process_aggregations(db: &FirestoreDb) -> Result<(), Error> {
-    let entries = fetch_new_entries(&db).await?;
+    let last_processed = fetch_last_processed(db).await?;
+    let entries = fetch_new_entries(db, last_processed).await?;
     println!("Fetched {} entries for processing", entries.len());
-    
+
     if entries.is_empty() {
         println!("No entries to process");
         return Ok(());
     }
 
-    let action_aggregates = aggregate_actions(&entries);
-    println!("Action aggregates: {:?}", action_aggregates);
-    write_by_action(&db, action_aggregates).await?;
+    // let past_aggregates = fetch_action_aggregates(&db).await?;
 
-    let hourly_aggregates = aggregate_hourly(&entries, Action::Served);
-    println!("Hourly aggregates: {:?}", hourly_aggregates);
-    write_by_hour(&db, hourly_aggregates).await?;
+    // let action_aggregates = aggregate_actions(&entries, &past_aggregates);
+    // println!("Action aggregates: {:?}", action_aggregates);
+    // write_by_action(&db, action_aggregates).await?;
 
-    let daily_aggregates = aggregate_daily(&entries, Action::Served);
-    println!("Daily aggregates: {:?}", daily_aggregates);
-    write_by_date(&db, daily_aggregates).await?;
+    // let hourly_aggregates = aggregate_hourly(&entries, Action::Served);
+    // println!("Hourly aggregates: {:?}", hourly_aggregates);
+    // write_by_hour(&db, hourly_aggregates).await?;
 
-    let category_aggregates = aggregate_by_category(&entries);
-    println!("Category aggregates: {:?}", category_aggregates);
-    write_by_category(&db, category_aggregates).await?;
+    // let daily_aggregates = aggregate_daily(&entries, Action::Served);
+    // println!("Daily aggregates: {:?}", daily_aggregates);
+    // write_by_date(&db, daily_aggregates).await?;
+
+    // let category_aggregates = aggregate_by_category(&entries);
+    // println!("Category aggregates: {:?}", category_aggregates);
+    // write_by_category(&db, category_aggregates).await?;
 
     // Update the last processed timestamp
     update_last_processed(&db, &entries).await?;

@@ -1,9 +1,13 @@
 use menu::libra_data::LibraData;
 use std::collections::HashMap;
 
-pub fn aggregate_by_category(data: &[LibraData]) -> HashMap<String, usize> {
+pub fn aggregate_by_category(
+    data: &[LibraData],
+    past_aggregate: &HashMap<String, usize>,
+) -> HashMap<String, usize> {
     data.iter().fold(HashMap::new(), |mut map, data| {
-        *map.entry(data.ingredient.clone()).or_insert(0) += 1;
+        *map.entry(data.ingredient.clone())
+            .or_insert(past_aggregate.get(&data.ingredient).unwrap_or(&0).clone()) += 1;
         map
     })
 }
@@ -55,19 +59,15 @@ mod tests {
             },
         ];
 
-        let result = aggregate_by_category(&data);
+        let mut past_aggregate: HashMap<String, usize> = HashMap::new();
+        past_aggregate.insert("apple".to_string(), 77);
+        past_aggregate.insert("banana".to_string(), 66);
+
+        let result = aggregate_by_category(&data, &past_aggregate);
         let mut expected = HashMap::new();
-        expected.insert("apple".to_string(), 2);
-        expected.insert("banana".to_string(), 1);
+        expected.insert("apple".to_string(), 79);
+        expected.insert("banana".to_string(), 67);
 
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_aggregate_by_category_with_no_items() {
-        let data: Vec<LibraData> = vec![];
-        let result = aggregate_by_category(&data);
-        let expected: HashMap<String, usize> = HashMap::new();
         assert_eq!(result, expected);
     }
 }

@@ -9,4 +9,6 @@ pub enum Error {
     EnvError(#[from] env::VarError),
     #[error("Failed to connect to Firestore")]
     FirestoreError(#[from] FirestoreError),
+    #[error("JSON serialization/deserialization error")]
+    JsonError(#[from] serde_json::Error),
 }
