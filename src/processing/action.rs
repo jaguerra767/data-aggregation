@@ -11,6 +11,7 @@ pub struct ActionAggregates {
     pub starting: usize,
     pub refilled: usize,
     pub offline: usize,
+    #[serde(with = "firestore::serialize_as_timestamp")]
     pub timestamp: DateTime<Utc>,
 }
 
@@ -32,6 +33,12 @@ impl ActionAggregates {
             timestamp: Utc::now(),
             ..*self
         }
+    }
+}
+
+impl Default for ActionAggregates {
+    fn default() -> Self {
+        ActionAggregates::new()
     }
 }
 

@@ -1,8 +1,10 @@
 use crate::error::Error;
+use crate::firestore::metadata::{fetch_metadata, update_metadata, LastProcessed, Metadata};
 use crate::processing::action::{aggregate_actions, ActionAggregates};
 use crate::processing::category::aggregate_by_category;
 use crate::processing::time::{aggregate_daily, aggregate_hourly};
 use chrono::{DateTime, Utc};
+use firestore::errors::FirestoreError;
 use firestore::FirestoreTimestamp;
 use firestore::*;
 use menu::{action::Action, libra_data::LibraData};
@@ -16,7 +18,6 @@ pub struct FirestoreLibraData {
     pub device: FirestoreDevice,
     pub location: String,
     pub ingredient: String,
-    #[serde(rename = "dataAction")]
     pub data_action: Action,
     pub amount: f64,
     #[serde(with = "firestore::serialize_as_timestamp")]
@@ -26,7 +27,6 @@ pub struct FirestoreLibraData {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FirestoreDevice {
     pub model: menu::device::Model,
-    #[serde(rename = "serialNumber")]
     pub serial_number: String,
 }
 
@@ -73,197 +73,122 @@ impl From<FirestoreLibraData> for LibraData {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct LastProcessed {
-    pub id: String,
-    #[serde(with = "firestore::serialize_as_timestamp")]
-    pub timestamp: DateTime<Utc>,
-}
-
-async fn fetch_last_processed(db: &FirestoreDb) -> Result<Option<LastProcessed>, Error> {
-    let last_processed = db
-        .fluent()
-        .select()
-        .by_id_in("aggregates_metadata")
-        .obj::<LastProcessed>()
-        .one("last_processed")
-        .await?;
-    Ok(last_processed)
-}
-
-async fn update_last_processed(db: &FirestoreDb, entries: &[LibraData]) -> Result<(), Error> {
-    if let Some(latest_entry) = entries.iter().max_by_key(|entry| entry.timestamp) {
-        // Convert time::OffsetDateTime to chrono::DateTime<Utc>
-        let timestamp_unix = latest_entry.timestamp.unix_timestamp();
-        let timestamp_nanos = latest_entry.timestamp.nanosecond();
-        let chrono_timestamp = DateTime::from_timestamp(timestamp_unix, timestamp_nanos).unwrap();
-
-        let last_processed = LastProcessed {
-            id: "last_processed".to_string(),
-            timestamp: chrono_timestamp,
-        };
-
-        // Use insert first, then update if it fails (upsert behavior)
-        let insert_result = db
-            .fluent()
-            .insert()
-            .into("aggregates_metadata")
-            .document_id("last_processed")
-            .object(&last_processed)
-            .execute::<()>()
-            .await;
-
-        if insert_result.is_err() {
-            // Document exists, update it
-            db.fluent()
-                .update()
-                .in_col("aggregates_metadata")
-                .document_id("last_processed")
-                .object(&last_processed)
-                .execute::<()>()
-                .await?;
-        }
-    }
-    Ok(())
+async fn fetch_all_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, FirestoreError> {
+    let firestore_entries: Vec<FirestoreLibraData> =
+        db.fluent().select().from("libra").obj().query().await?;
+    Ok(firestore_entries.into_iter().map(LibraData::from).collect())
 }
 
 async fn fetch_new_entries(
     db: &FirestoreDb,
-    last_processed: Option<LastProcessed>,
-) -> Result<Vec<LibraData>, Error> {
-    let firestore_data: Vec<FirestoreLibraData> = match last_processed {
-        Some(last_proc) => {
-            println!("Filtering entries newer than: {}", last_proc.timestamp);
-            // Convert DateTime<Utc> to FirestoreTimestamp
-            let firestore_timestamp = FirestoreTimestamp::from(last_proc.timestamp);
-
-            let result = db
-                .fluent()
-                .select()
-                .from("libra")
-                .filter(|q| {
-                    q.field("timestamp")
-                        .greater_than(firestore_timestamp.clone())
-                })
-                .obj()
-                .query()
-                .await;
-
-            match result {
-                Ok(data) => data,
-                Err(e) => {
-                    println!(
-                        "Warning: Failed to fetch some documents, continuing with partial data: {}",
-                        e
-                    );
-                    Vec::new()
-                }
-            }
-        }
-        None => {
-            // No last_processed document exists, fetch all entries
-            println!("No last_processed document found, fetching all entries");
-            let result = db.fluent().select().from("libra").obj().query().await;
-
-            match result {
-                Ok(data) => data,
-                Err(e) => {
-                    println!(
-                        "Warning: Failed to fetch some documents, continuing with partial data: {}",
-                        e
-                    );
-                    Vec::new()
-                }
-            }
-        }
-    };
-
-    println!("Query returned {} entries", firestore_data.len());
-
-    // Convert back to LibraData
-    let data: Vec<LibraData> = firestore_data.into_iter().map(LibraData::from).collect();
-    Ok(data)
+    last_processed: LastProcessed,
+) -> Result<Vec<LibraData>, FirestoreError> {
+    let timestamp = FirestoreTimestamp::from(last_processed.timestamp);
+    let firestore_entries: Vec<FirestoreLibraData> = db
+        .fluent()
+        .select()
+        .from("libra")
+        .filter(|q| q.field("timestamp").greater_than(timestamp.clone()))
+        .obj()
+        .query()
+        .await?;
+    Ok(firestore_entries.into_iter().map(LibraData::from).collect())
 }
 
 async fn write_by_category(
     db: &FirestoreDb,
-    aggregates: HashMap<String, usize>,
+    aggregates: &HashMap<String, usize>,
 ) -> Result<(), Error> {
-    for (category, count) in aggregates {
-        db.fluent()
-            .update()
-            .in_col("aggregates_categories")
-            .document_id(category)
-            .object(&serde_json::json!({"count": count}))
-            .execute::<()>()
-            .await?;
-    }
+    db.fluent()
+        .update()
+        .in_col("aggregates")
+        .document_id("categories")
+        .object(aggregates)
+        .execute::<()>()
+        .await?;
+
     Ok(())
 }
 
-async fn write_by_action(
+
+async fn fetch_by_category(
     db: &FirestoreDb,
-    aggregates: HashMap<Action, usize>,
-) -> Result<(), Error> {
-    for (action, count) in aggregates {
-        db.fluent()
-            .update()
-            .in_col("aggregates_actions")
-            .document_id(action.to_string())
-            .object(&serde_json::json!({"count": count}))
-            .execute::<()>()
-            .await?;
-    }
+) -> Result<Option<HashMap<String, usize>>, FirestoreError> {
+    db.fluent()
+        .select()
+        .by_id_in("aggregates")
+        .obj::<HashMap<String, usize>>()
+        .one("category")
+        .await
+}
+
+async fn write_by_action(db: &FirestoreDb, aggregates: &ActionAggregates) -> Result<(), Error> {
+    db.fluent()
+        .update()
+        .in_col("aggregates")
+        .document_id("actions")
+        .object(aggregates)
+        .execute::<()>()
+        .await?;
     Ok(())
 }
 
-async fn write_by_hour(db: &FirestoreDb, aggregates: HashMap<u8, usize>) -> Result<(), Error> {
-    for (hour, count) in aggregates {
-        db.fluent()
-            .update()
-            .in_col("aggregates_time_hours")
-            .document_id(format!("{}", hour))
-            .object(&serde_json::json!({"count": count}))
-            .execute::<()>()
-            .await?;
-    }
+async fn write_by_hour(db: &FirestoreDb, aggregates: &HashMap<u8, usize>) -> Result<(), Error> {
+    db.fluent()
+        .update()
+        .in_col("aggregates")
+        .document_id("hourly")
+        .object(aggregates)
+        .execute::<()>()
+        .await?;
+
     Ok(())
 }
 
-async fn write_by_date(db: &FirestoreDb, aggregates: HashMap<Date, usize>) -> Result<(), Error> {
-    for (date, count) in aggregates {
-        db.fluent()
-            .update()
-            .in_col("aggregates_time_dates")
-            .document_id(date.to_string())
-            .object(&serde_json::json!({"count": count}))
-            .execute::<()>()
-            .await?;
-    }
+async fn fetch_hourly_aggregates(
+    db: &FirestoreDb,
+) -> Result<Option<HashMap<u8, usize>>, FirestoreError> {
+    db.fluent()
+        .select()
+        .by_id_in("aggregates")
+        .obj::<HashMap<u8, usize>>()
+        .one("hourly")
+        .await
+}
+
+async fn write_by_date(db: &FirestoreDb, aggregates: &HashMap<Date, usize>) -> Result<(), Error> {
+    db.fluent()
+        .update()
+        .in_col("aggregates")
+        .document_id("daily")
+        .object(aggregates)
+        .execute::<()>()
+        .await?;
     Ok(())
 }
 
-// async fn fetch_action_aggregates(db: &FirestoreDb) -> Result<HashMap<Action, usize>, Error> {
-//     let mut action_aggregates: HashMap<Action, usize> = HashMap::new();
-//     let actions = ["Heartbeat", "Served", "RanOut", "Starting", "Refilled"];
-//     for act in actions {
-//         if let Some(res) = db
-//             .fluent()
-//             .select()
-//             .by_id_in("aggregates_metadata")
-//             .obj::<ActionAggregates>()
-//             .one(act)
-//             .await?
-//         {
-//             action_aggregates.insert(serde_json::from_str::<Action>(act)?, res.count);
-//         }
-//     }
-//     Ok(action_aggregates)
-// }
+
+async fn fetch_daily_aggregates(
+    db: &FirestoreDb,
+) -> Result<Option<HashMap<Date, usize>>, FirestoreError> {
+    db.fluent()
+        .select()
+        .by_id_in("aggregates")
+        .obj::<HashMap<Date, usize>>()
+        .one("hourly")
+        .await
+}
+
 
 pub async fn process_aggregations(db: &FirestoreDb) -> Result<(), Error> {
-    let last_processed = fetch_last_processed(db).await?;
-    let entries = fetch_new_entries(db, last_processed).await?;
+    let (entries, last_aggregate) = match fetch_metadata(db).await? {
+        Some(metadata) => (
+            fetch_new_entries(db, metadata.last_processed).await?,
+            metadata.last_aggregate,
+        ),
+        None => (fetch_all_entries(db).await?, ActionAggregates::new()),
+    };
+
     println!("Fetched {} entries for processing", entries.len());
 
     if entries.is_empty() {
@@ -271,26 +196,32 @@ pub async fn process_aggregations(db: &FirestoreDb) -> Result<(), Error> {
         return Ok(());
     }
 
-    // let past_aggregates = fetch_action_aggregates(&db).await?;
+    let action_aggregates = aggregate_actions(entries.as_slice(), &last_aggregate);
+    write_by_action(db, &action_aggregates).await?;
 
-    // let action_aggregates = aggregate_actions(&entries, &past_aggregates);
-    // println!("Action aggregates: {:?}", action_aggregates);
-    // write_by_action(&db, action_aggregates).await?;
+    if let Some(agg) = fetch_hourly_aggregates(db).await? {
+        let hourly_aggregates = aggregate_hourly(&entries, Action::Served, &agg);
+        write_by_hour(db, &hourly_aggregates).await?;
+    }
 
-    // let hourly_aggregates = aggregate_hourly(&entries, Action::Served);
-    // println!("Hourly aggregates: {:?}", hourly_aggregates);
-    // write_by_hour(&db, hourly_aggregates).await?;
+    if let Some(agg) = fetch_daily_aggregates(db).await? {
+        let daily_aggregates = aggregate_daily(&entries, Action::Served, &agg);
+        write_by_date(db, &daily_aggregates).await?;
+    }
 
-    // let daily_aggregates = aggregate_daily(&entries, Action::Served);
-    // println!("Daily aggregates: {:?}", daily_aggregates);
-    // write_by_date(&db, daily_aggregates).await?;
-
-    // let category_aggregates = aggregate_by_category(&entries);
-    // println!("Category aggregates: {:?}", category_aggregates);
-    // write_by_category(&db, category_aggregates).await?;
+    if let Some(agg) = fetch_by_category(db).await? {
+        let category_aggregates = aggregate_by_category(&entries, &agg);
+        write_by_category(db, &category_aggregates).await?;
+    }
 
     // Update the last processed timestamp
-    update_last_processed(&db, &entries).await?;
+    let metadata = Metadata {
+        last_processed: LastProcessed {
+            timestamp: Utc::now(),
+        },
+        last_aggregate: action_aggregates.clone(),
+    };
+    update_metadata(db, &metadata).await?;
     println!("Updated last processed timestamp");
 
     Ok(())

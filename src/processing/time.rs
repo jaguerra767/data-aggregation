@@ -12,10 +12,9 @@ pub fn aggregate_hourly(
         .filter(|data| data.data_action == action)
         .fold(HashMap::new(), |mut map, data| {
             *map.entry(data.timestamp.hour()).or_insert(
-                past_aggregate
+                *past_aggregate
                     .get(&data.timestamp.hour())
                     .unwrap_or(&0)
-                    .clone(),
             ) += 1;
             map
         })
@@ -30,10 +29,9 @@ pub fn aggregate_daily(
         .filter(|data| data.data_action == action)
         .fold(HashMap::new(), |mut map, data| {
             *map.entry(data.timestamp.date()).or_insert(
-                past_aggregate
+                *past_aggregate
                     .get(&data.timestamp.date())
                     .unwrap_or(&0)
-                    .clone(),
             ) += 1;
             map
         })

@@ -4,4 +4,7 @@
 *.log
 firebase.json
 .idea
+.zed
+.vscode
+
 
