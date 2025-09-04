@@ -27,6 +27,7 @@ pub struct FirestoreLibraData {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FirestoreDevice {
     pub model: menu::device::Model,
+    #[serde(rename = "serialNumber")]
     pub serial_number: String,
 }
 
