@@ -3,3 +3,4 @@
 /.firebaserc
 *.log
 firebase.json
+.idea
