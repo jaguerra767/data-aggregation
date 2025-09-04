@@ -110,6 +110,7 @@ async fn write_by_category(
     Ok(())
 }
 
+
 async fn fetch_by_category(
     db: &FirestoreDb,
 ) -> Result<Option<HashMap<String, usize>>, FirestoreError> {
@@ -166,6 +167,7 @@ async fn write_by_date(db: &FirestoreDb, aggregates: &HashMap<Date, usize>) -> R
     Ok(())
 }
 
+
 async fn fetch_daily_aggregates(
     db: &FirestoreDb,
 ) -> Result<Option<HashMap<Date, usize>>, FirestoreError> {
@@ -176,6 +178,7 @@ async fn fetch_daily_aggregates(
         .one("hourly")
         .await
 }
+
 
 pub async fn process_aggregations(db: &FirestoreDb) -> Result<(), Error> {
     let (entries, last_aggregate) = match fetch_metadata(db).await? {
@@ -222,4 +225,19 @@ pub async fn process_aggregations(db: &FirestoreDb) -> Result<(), Error> {
     println!("Updated last processed timestamp");
 
     Ok(())
+}
+
+pub async fn read_locations(db: &FirestoreDb) -> Result<Vec<LocationData>, Error> {
+    fetch_location_entries(db).await
+}
+
+async fn fetch_location_entries(db: &FirestoreDb) -> Result<Vec<LocationData>, Error> {
+    let firestore_data: Vec<LocationData> =
+        db.fluent().select().from("locations").obj().query().await?;
+    Ok(firestore_data)
+}
+#[derive(Deserialize, Serialize, Debug)]
+pub struct LocationData {
+    pub location: String,
+    pub device: FirestoreDevice,
 }

@@ -3,6 +3,8 @@
 /.firebaserc
 *.log
 firebase.json
-/.idea
-/.zed
-/.vscode
+.idea
+.zed
+.vscode
+
+
