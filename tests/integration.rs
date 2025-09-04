@@ -1,5 +1,7 @@
 use data_aggregation::error::Error;
-use data_aggregation::firestore::client::process_aggregations;
+use data_aggregation::firestore::client::{
+    process_aggregations, read_locations, FirestoreDevice, LocationData,
+};
 use firestore::FirestoreDb;
 use menu::action::Action;
 use menu::device::{Device, Model};
@@ -97,5 +99,72 @@ async fn test_aggregation() -> Result<(), Error> {
 
     seed_libra_data(&db).await?;
     process_aggregations(&db).await?;
+    Ok(())
+}
+
+async fn seed_locations(db: &FirestoreDb) -> Result<(), Error> {
+    let data = vec![
+        LocationData {
+            location: "Caldo HQ".into(),
+            device: FirestoreDevice {
+                model: Model::LibraV0,
+                serial_number: "000-0".into(),
+            },
+        },
+        LocationData {
+            location: "Caldo HQ".into(),
+            device: FirestoreDevice {
+                model: Model::LibraV0,
+                serial_number: "000-1".into(),
+            },
+        },
+        LocationData {
+            location: "Google".into(),
+            device: FirestoreDevice {
+                model: Model::LibraV0,
+                serial_number: "000-2".into(),
+            },
+        },
+        LocationData {
+            location: "Google".into(),
+            device: FirestoreDevice {
+                model: Model::LibraV0,
+                serial_number: "000-3".into(),
+            },
+        },
+    ];
+    for d in data {
+        println!("Inserting data: {:?}", d);
+        let result = db
+            .fluent()
+            .insert()
+            .into("locations")
+            .generate_document_id()
+            .object(&d)
+            .execute::<()>()
+            .await?;
+        println!("Insert result: {:?}", result);
+    }
+    Ok(())
+}
+#[tokio::test]
+async fn test_locations() -> Result<(), Error> {
+    // Try to load .env and see if it succeeds
+    dotenv::dotenv().ok();
+
+    // Debug: Check if the env var is set correctly
+    println!(
+        "FIRESTORE_EMULATOR_HOST: {:?}",
+        std::env::var("FIRESTORE_EMULATOR_HOST")
+    );
+
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
+    let db = FirestoreDb::new("back-of-house-backend".to_string()).await?;
+
+    seed_locations(&db).await?;
+    read_locations(&db).await?;
     Ok(())
 }

@@ -127,8 +127,10 @@ async fn update_last_processed(db: &FirestoreDb, entries: &[LibraData]) -> Resul
     Ok(())
 }
 
-async fn fetch_new_entries(db: &FirestoreDb, last_processed: Option<LastProcessed>) -> Result<Vec<LibraData>, Error> {
-
+async fn fetch_new_entries(
+    db: &FirestoreDb,
+    last_processed: Option<LastProcessed>,
+) -> Result<Vec<LibraData>, Error> {
     let firestore_data: Vec<FirestoreLibraData> = match last_processed {
         Some(last_proc) => {
             println!("Filtering entries newer than: {}", last_proc.timestamp);
@@ -241,7 +243,6 @@ async fn write_by_date(db: &FirestoreDb, aggregates: HashMap<Date, usize>) -> Re
     Ok(())
 }
 
-
 // async fn fetch_action_aggregates(db: &FirestoreDb) -> Result<HashMap<Action, usize>, Error> {
 //     let mut action_aggregates: HashMap<Action, usize> = HashMap::new();
 //     let actions = ["Heartbeat", "Served", "RanOut", "Starting", "Refilled"];
@@ -293,4 +294,19 @@ pub async fn process_aggregations(db: &FirestoreDb) -> Result<(), Error> {
     println!("Updated last processed timestamp");
 
     Ok(())
+}
+
+pub async fn read_locations(db: &FirestoreDb) -> Result<Vec<LocationData>, Error> {
+    fetch_location_entries(db).await
+}
+
+async fn fetch_location_entries(db: &FirestoreDb) -> Result<Vec<LocationData>, Error> {
+    let firestore_data: Vec<LocationData> =
+        db.fluent().select().from("locations").obj().query().await?;
+    Ok(firestore_data)
+}
+#[derive(Deserialize, Serialize, Debug)]
+pub struct LocationData {
+    pub location: String,
+    pub device: FirestoreDevice,
 }
