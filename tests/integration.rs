@@ -17,7 +17,7 @@ async fn seed_libra_data(db: &FirestoreDb) -> Result<(), Error> {
             ingredient: "Plastic French Fries".to_string(),
             data_action: Action::Served,
             amount: 0.0,
-            timestamp: OffsetDateTime::now_local().unwrap(),
+            timestamp: OffsetDateTime::now_utc(),
         },
         LibraData {
             device: Device {
@@ -28,7 +28,7 @@ async fn seed_libra_data(db: &FirestoreDb) -> Result<(), Error> {
             ingredient: "Fake Broccoli".to_string(),
             data_action: Action::Served,
             amount: 0.0,
-            timestamp: OffsetDateTime::now_local().unwrap(),
+            timestamp: OffsetDateTime::now_utc(),
         },
         LibraData {
             device: Device {
@@ -39,7 +39,7 @@ async fn seed_libra_data(db: &FirestoreDb) -> Result<(), Error> {
             ingredient: "Kettle Chips".to_string(),
             data_action: Action::Served,
             amount: 0.0,
-            timestamp: OffsetDateTime::now_local().unwrap(),
+            timestamp: OffsetDateTime::now_utc(),
         },
         LibraData {
             device: Device {
@@ -50,7 +50,7 @@ async fn seed_libra_data(db: &FirestoreDb) -> Result<(), Error> {
             ingredient: "Popcorn".to_string(),
             data_action: Action::Served,
             amount: 0.0,
-            timestamp: OffsetDateTime::now_local().unwrap(),
+            timestamp: OffsetDateTime::now_utc(),
         },
     ];
     for d in data {
@@ -86,14 +86,6 @@ async fn test_aggregation() -> Result<(), Error> {
         .expect("Failed to install rustls crypto provider");
 
     let db = FirestoreDb::new("back-of-house-backend".to_string()).await?;
-
-    // Clear the last_processed record to start fresh
-    // let _ = db.fluent()
-    //     .delete()
-    //     .from("aggregates")
-    //     .document_id("last_processed")
-    //     .execute()
-    //     .await;
 
     seed_libra_data(&db).await?;
     process_aggregations(&db).await?;

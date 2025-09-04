@@ -1,8 +1,8 @@
 use crate::error::Error;
 use crate::firestore::metadata::{fetch_metadata, update_metadata, LastProcessed, Metadata};
 use crate::processing::action::{aggregate_actions, ActionAggregates};
+use crate::processing::category::aggregate_by_category;
 use crate::processing::time::{aggregate_daily, aggregate_hourly};
-use crate::processing::category::{aggregate_by_category};
 use chrono::{DateTime, Utc};
 use firestore::errors::FirestoreError;
 use firestore::FirestoreTimestamp;
@@ -18,7 +18,6 @@ pub struct FirestoreLibraData {
     pub device: FirestoreDevice,
     pub location: String,
     pub ingredient: String,
-    #[serde(rename = "dataAction")]
     pub data_action: Action,
     pub amount: f64,
     #[serde(with = "firestore::serialize_as_timestamp")]
@@ -28,7 +27,6 @@ pub struct FirestoreLibraData {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FirestoreDevice {
     pub model: menu::device::Model,
-    #[serde(rename = "serialNumber")]
     pub serial_number: String,
 }
 
@@ -76,7 +74,9 @@ impl From<FirestoreLibraData> for LibraData {
 }
 
 async fn fetch_all_entries(db: &FirestoreDb) -> Result<Vec<LibraData>, FirestoreError> {
-    db.fluent().select().from("libra").obj().query().await
+    let firestore_entries: Vec<FirestoreLibraData> =
+        db.fluent().select().from("libra").obj().query().await?;
+    Ok(firestore_entries.into_iter().map(LibraData::from).collect())
 }
 
 async fn fetch_new_entries(
@@ -84,13 +84,15 @@ async fn fetch_new_entries(
     last_processed: LastProcessed,
 ) -> Result<Vec<LibraData>, FirestoreError> {
     let timestamp = FirestoreTimestamp::from(last_processed.timestamp);
-    db.fluent()
+    let firestore_entries: Vec<FirestoreLibraData> = db
+        .fluent()
         .select()
         .from("libra")
         .filter(|q| q.field("timestamp").greater_than(timestamp.clone()))
         .obj()
         .query()
-        .await
+        .await?;
+    Ok(firestore_entries.into_iter().map(LibraData::from).collect())
 }
 
 async fn write_by_category(
@@ -203,12 +205,11 @@ pub async fn process_aggregations(db: &FirestoreDb) -> Result<(), Error> {
         let daily_aggregates = aggregate_daily(&entries, Action::Served, &agg);
         write_by_date(db, &daily_aggregates).await?;
     }
-    
+
     if let Some(agg) = fetch_by_category(db).await? {
         let category_aggregates = aggregate_by_category(&entries, &agg);
         write_by_category(db, &category_aggregates).await?;
     }
-
 
     // Update the last processed timestamp
     let metadata = Metadata {
