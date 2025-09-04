@@ -7,7 +7,7 @@ pub fn aggregate_by_category(
 ) -> HashMap<String, usize> {
     data.iter().fold(HashMap::new(), |mut map, data| {
         *map.entry(data.ingredient.clone())
-            .or_insert(past_aggregate.get(&data.ingredient).unwrap_or(&0).clone()) += 1;
+            .or_insert(*past_aggregate.get(&data.ingredient).unwrap_or(&0)) += 1;
         map
     })
 }

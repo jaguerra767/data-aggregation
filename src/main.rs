@@ -18,8 +18,6 @@ async fn main() -> Result<(), Error> {
     // Get project ID from environment variable
     let project = env::var("GOOGLE_CLOUD_PROJECT")?;
 
-    
-    
     println!("Starting data aggregation service for project: {}", project);
 
     // Create the aggregation route
