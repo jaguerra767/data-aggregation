@@ -18,6 +18,7 @@ pub struct FirestoreLibraData {
     pub device: FirestoreDevice,
     pub location: String,
     pub ingredient: String,
+    #[serde(rename = "dataAction")]
     pub data_action: Action,
     pub amount: f64,
     #[serde(with = "firestore::serialize_as_timestamp")]
