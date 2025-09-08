@@ -1,6 +1,6 @@
 use data_aggregation::error::Error;
 use data_aggregation::firestore::client::{process_aggregations, read_locations, LocationData};
-use data_aggregation::query::LocationQuery;
+use data_aggregation::query::{DataQuery, LocationQuery};
 use dotenv::dotenv;
 use firestore::*;
 use std::env;
@@ -14,7 +14,7 @@ async fn main() -> Result<(), Error> {
     // Debug: Check if the emulator host env var is set correctly
     println!(
         "FIRESTORE_EMULATOR_HOST: {:?}",
-        std::env::var("FIRESTORE_EMULATOR_HOST")
+        env::var("FIRESTORE_EMULATOR_HOST")
     );
 
     // Initialize rustls crypto provider
@@ -44,6 +44,12 @@ async fn main() -> Result<(), Error> {
         .and(with_db.clone())
         .and_then(handle_location_query);
 
+    let data_route = warp::path("data")
+        .and(warp::get())
+        .and(warp::query::<DataQuery>())
+        .and(with_db.clone())
+        .and_then(handle_data_query);
+
     // Health check route
     let health_route = warp::path("health").and(warp::get()).map(|| "OK");
 
@@ -55,7 +61,9 @@ async fn main() -> Result<(), Error> {
     let routes = aggregation_route
         .or(health_route)
         .or(root_route)
-        .or(locations_route);
+        .or(locations_route)
+        .or(data_route)
+        .recover(handle_rejection);
 
     println!("Server starting on port 8080");
     warp::serve(routes).run(([0, 0, 0, 0], 8080)).await;
@@ -103,5 +111,27 @@ async fn handle_location_query(
             eprintln!("Location query failed: {:?}", e);
             Err(warp::reject::custom(e))
         }
+    }
+}
+
+async fn handle_data_query(query: DataQuery, db: FirestoreDb) -> Result<impl Reply, Rejection> {
+    let data = query.run_query(&db).await?;
+    let reply = warp::reply::json(&data);
+    Ok(warp::reply::with_status(reply, warp::http::StatusCode::OK))
+}
+
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
+    if err.is_not_found() {
+        Ok(warp::reply::with_status(
+            "Not Found",
+            warp::http::StatusCode::NOT_FOUND,
+        ))
+    } else if err.find::<warp::reject::InvalidQuery>().is_some() {
+        Ok(warp::reply::with_status(
+            "Invalid query: unknown field or wrong type",
+            warp::http::StatusCode::BAD_REQUEST,
+        ))
+    } else {
+        Err(err)
     }
 }

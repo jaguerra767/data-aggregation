@@ -12,5 +12,7 @@ pub enum Error {
     FirestoreError(#[from] FirestoreError),
     #[error("JSON serialization/deserialization error")]
     JsonError(#[from] serde_json::Error),
+    #[error("Data does not meet query requirements")]
+    QueryError,
 }
 impl Reject for Error {}
